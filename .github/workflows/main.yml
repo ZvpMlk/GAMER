@@ -1,4 +1,5 @@
-name: RDP
+
+name: Roblox Studio - Teste de Windows
 
 on:
   workflow_dispatch:
@@ -7,48 +8,101 @@ permissions:
   contents: read
 
 jobs:
-  pc-virtual:
+  windows:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
 
     steps:
-      - name: Instalar AnyDesk e mostrar ID e senha
-        timeout-minutes: 15
+      - name: Conferir senha protegida
+        shell: pwsh
+        env:
+          ANYDESK_PASS: ${{ secrets.ANYDESK_PASSWORD }}
         run: |
-          $chars = "abcdefghjkmnpqrstuvwxyz23456789".ToCharArray()
-          $pw = "Ab3-" + (-join ($chars | Get-Random -Count 10))
-
-          $ad = "C:\AnyDesk\AnyDesk.exe"
-          Invoke-WebRequest -Uri "https://download.anydesk.com/AnyDesk.exe" -OutFile "$env:TEMP\AnyDesk.exe"
-          Start-Process "$env:TEMP\AnyDesk.exe" -ArgumentList "--install C:\AnyDesk --start-with-win --silent"
-
-          for ($i = 0; $i -lt 40 -and -not (Test-Path $ad); $i++) { Start-Sleep -Seconds 3 }
-          if (-not (Test-Path $ad)) {
-              Write-Error "AnyDesk nao foi instalado"
-              exit 1
+          if ([string]::IsNullOrWhiteSpace($env:ANYDESK_PASS)) {
+            throw "Crie o secret ANYDESK_PASSWORD neste repositorio."
           }
-          Start-Sleep -Seconds 15
+          Write-Host "Senha protegida encontrada."
 
-          cmd /c "echo $pw | ""$ad"" --set-password"
-          Start-Sleep -Seconds 5
+      - name: Brasil e diagnostico do Windows
+        shell: pwsh
+        run: |
+          try {
+            Set-TimeZone -Id "E. South America Standard Time" -ErrorAction Stop
+            Set-Culture -CultureInfo "pt-BR" -ErrorAction Stop
+            Write-Host "Fuso horario e formato regional configurados para Brasil."
+          } catch {
+            Write-Warning "Nao foi possivel aplicar alguma configuracao regional."
+          }
+
+          $cpu = Get-CimInstance Win32_Processor
+          $pc = Get-CimInstance Win32_ComputerSystem
+          $windows = Get-CimInstance Win32_OperatingSystem
+          Write-Host "WINDOWS: $($windows.Caption)"
+          Write-Host "NUCLEOS LOGICOS: $($pc.NumberOfLogicalProcessors)"
+          Write-Host ("RAM (GB): {0:N1}" -f ($pc.TotalPhysicalMemory / 1GB))
+
+          try {
+            $pais = (Invoke-RestMethod -Uri "https://ipinfo.io/country" -TimeoutSec 15).Trim()
+            Write-Host "PAIS DO IP PUBLICO: $pais"
+          } catch {
+            Write-Warning "Nao foi possivel consultar o pais do IP."
+          }
+
+          $atalho = Join-Path $env:PUBLIC "Desktop\ChatGPT.url"
+          Set-Content -Path $atalho -Encoding ASCII -Value @(
+            "[InternetShortcut]"
+            "URL=https://chatgpt.com"
+          )
+          Write-Host "Atalho ChatGPT Web criado na area de trabalho publica."
+
+      - name: Instalar AnyDesk e gerar ID
+        shell: pwsh
+        env:
+          ANYDESK_PASS: ${{ secrets.ANYDESK_PASSWORD }}
+        run: |
+          $instalador = Join-Path $env:TEMP "AnyDesk.exe"
+          $ad = "C:\AnyDesk\AnyDesk.exe"
+
+          Invoke-WebRequest -Uri "https://download.anydesk.com/AnyDesk.exe" -OutFile $instalador
+          Start-Process -FilePath $instalador -ArgumentList "--install C:\AnyDesk --start-with-win --silent"
+
+          for ($i = 1; $i -le 40 -and -not (Test-Path $ad); $i++) {
+            Start-Sleep -Seconds 3
+          }
+          if (-not (Test-Path $ad)) {
+            throw "AnyDesk nao foi instalado."
+          }
+
+          Start-Sleep -Seconds 10
+          & $ad --start | Out-Null
+          $env:ANYDESK_PASS | & $ad --set-password _unattended_access | Out-Null
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Nao foi possivel configurar acesso nao supervisionado."
+          }
 
           $id = ""
-          for ($i = 0; $i -lt 12 -and -not $id; $i++) {
-              $id = (& $ad --get-id | Out-String).Trim()
-              if (-not $id) { Start-Sleep -Seconds 5 }
-          }
-          if (-not $id) {
-              Write-Error "Nao consegui obter o ID do AnyDesk"
-              exit 1
+          for ($i = 1; $i -le 15; $i++) {
+            Start-Sleep -Seconds 5
+            $id = (& $ad --get-id | Out-String).Trim()
+            if ($id -match "^[0-9]{6,12}$") { break }
           }
 
-          Write-Host ""
-          Write-Host "=============================="
-          Write-Host "ID:    $id"
-          Write-Host "SENHA: $pw"
-          Write-Host "=============================="
+          if ($id -notmatch "^[0-9]{6,12}$") {
+            throw "AnyDesk nao retornou ID valido nesta VM."
+          }
 
-      - name: Manter ativo
+          Write-Host "================================="
+          Write-Host "ANYDESK ID: $id"
+          Write-Host "SENHA: use a que salvou em ANYDESK_PASSWORD."
+          Write-Host "================================="
+
+      - name: Manter teste ativo
+        shell: pwsh
         run: |
-          $end = (Get-Date).AddMinutes(350)
-          while ((Get-Date) -lt $end) { Start-Sleep -Seconds 60 }
+          Write-Host "Sessao temporaria de teste iniciada."
+          $fim = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $fim) {
+            Start-Sleep -Seconds 30
+          }
+          Write-Host "Fim do teste."
